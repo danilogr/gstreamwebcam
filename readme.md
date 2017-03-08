@@ -48,7 +48,9 @@ Note that the command line above requires other plugins.
 
 ### VP8
 
-```gst-launch-1.0 udpsrc port=9001 caps = "application/x-rtp, clock-rate=(int)90000, payload=(int)96, a-framerate=(string)30" ! rtpvp8depay ! vp8dec ! videoconvert ! autovideosink```
+```
+gst-launch-1.0 udpsrc port=9001 caps = "application/x-rtp, clock-rate=(int)90000, payload=(int)96, a-framerate=(string)30" ! rtpvp8depay ! vp8dec ! videoconvert ! autovideosink
+```
 
 
 
