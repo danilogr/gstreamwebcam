@@ -1,7 +1,7 @@
 # GStreamWebcam
-This tool is a python 3.0 script that invokes [gstreamer-1.0](https://gstreamer.freedesktop.org/), reads from the user swebcam (or other valid video source), encodes the video stream in either `H264` or `VP8`,and sends it to the desired host through RTP/UDP. 
+This tool is a python 3.0 script that invokes [gstreamer-1.0](https://gstreamer.freedesktop.org/), reads from the webcam (or other valid video source), encodes the video stream in either `H264` or `VP8`, and sends it to the desired host through RTP/UDP. 
 
-Playing the stream is quite simple since it also creates a valid SDP file (`session.sdp`) that can be used on [VLC](https://www.videolan.org/vlc/index.html)
+Playing the stream is quite simple since it also creates a valid SDP file (`session.sdp`) that can be used with [VLC](https://www.videolan.org/vlc/index.html)
 
 ## Requirements
 
