@@ -5,9 +5,9 @@ import signal
 import random
 import socket
 from collections import defaultdict
+import sys
 
 random.seed(None)
-
 
 def createsdp(hostname, streams):
     params2ignore = set(['encoding-name', 'timestamp-offset', 'payload', 'clock-rate', 'media', 'port'])
@@ -43,6 +43,7 @@ def createsdp(hostname, streams):
 
 
 def main(arguments):
+    gstreamer = 'gst-launch-1.0.exe' if platform.system().lower() == "windows" else 'gst-launch-1.0'
     hostname = arguments.hostname
     encoders = {'h264' : (b'GstRtpH264Pay' , 'x264enc', 'rtph264pay'),
                 'vp8' : (b'GstRtpVP8Pay', 'vp8enc', 'rtpvp8pay')}
