@@ -43,10 +43,12 @@ def createsdp(hostname, streams):
 
 
 def main(arguments):
-    gstreamer = 'gst-launch-1.0.exe' if platform.system().lower() == "windows" else 'gst-launch-1.0'
+    
+    gstreamer = 'gst-launch-1.0.exe' if 'win' in sys.platform else 'gst-launch-1.0'
     hostname = arguments.hostname
     encoders = {'h264' : (b'GstRtpH264Pay' , 'x264enc', 'rtph264pay'),
-                'vp8' : (b'GstRtpVP8Pay', 'vp8enc', 'rtpvp8pay')}
+                'vp8' : (b'GstRtpVP8Pay', 'vp8enc', 'rtpvp8pay'),
+                'openh264' : (b'GstRtpH264Pay', 'openh264enc', 'rtph264pay')}
     rtppay = encoders[arguments.codec][0]
     port = arguments.port
     process = Popen(["gst-launch-1.0.exe", "-v", "autovideosrc", "!", "videoconvert", "!", encoders[arguments.codec][1],
@@ -58,12 +60,12 @@ def main(arguments):
         print('Terminating child process')
 
     signal.signal(signal.SIGINT, signal_handler)
-
+    patternGenerated = False
     try:
         p = re.compile(rb'/GstPipeline:pipeline\d+/%b:\w+\d+.GstPad:src: caps = (.+)' % rtppay)
         for line in process.stdout:
             pattern = p.search(line)
-            if pattern:
+            if pattern and not patternGenerated:
                 parameters = re.findall(rb'(([\w-]+)=(?:\(\w+\))?(?:(\w+)|(?:"([^"]+)")))', pattern.groups()[0])
                 #print(parameters)
                 parammap = defaultdict(str)
@@ -71,10 +73,12 @@ def main(arguments):
                     parammap[param.decode('ascii')] = value.decode('ascii') if value else value2.decode('ascii')
                     parammap['port'] = port
 
-                if arguments.sdp:
-                    createsdp(hostname, [parammap])
-                for param,value in parammap.items():
-                    print("%s = %s" % (param, value))
+                if len(parammap) > 0:
+                    patternGenerated = True
+                    if arguments.sdp:
+                        createsdp(hostname, [parammap])
+                    for param,value in parammap.items():
+                        print("%s = %s" % (param, value))
     finally:
         process.wait()
 
@@ -83,7 +87,7 @@ if __name__ == "__main__":
     parser.add_argument("hostname", help="hostname or IP address of the destination")
     parser.add_argument("--sdp", help="generates SDP file for the stream (defaults to false)", action="store_true")
     parser.add_argument("--port", "-p", help="port (defaults to 5000)", type=int, default=5000)
-    parser.add_argument("--codec", help="chooses encoder", choices=['vp8', 'h264'], default='h264')
+    parser.add_argument("--codec", help="chooses encoder (defaults to openh264)", choices=['vp8', 'h264', 'openh264'], default='openh264')
     args = parser.parse_args()
 
     args.hostname = socket.gethostbyname(args.hostname)
