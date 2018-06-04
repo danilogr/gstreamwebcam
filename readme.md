@@ -21,18 +21,39 @@ Plugin `x264enc` is only required if encoding H264 using libx264.
 
 ```
 $ python gstreamcam.py -h
-usage: gstreamcam.py <hostname> [-h] [--sdp] [--port PORT] [--codec {vp8,h264,openh264}]
-                     
+usage: gstreamcam.py [-h] [--sdp] [--debug] [--port PORT]
+                     [--codec {vp8,h264,openh264}] [--camera CAMERA]
+                     hostname
+
 positional arguments:
   hostname              hostname or IP address of the destination
 
 optional arguments:
   -h, --help            show this help message and exit
   --sdp                 generates SDP file for the stream (defaults to false)
+  --debug               shows command line in use to call gstreamer
   --port PORT, -p PORT  port (defaults to 5000)
   --codec {vp8,h264,openh264}
                         chooses encoder (defaults to openh264)
+  --camera CAMERA       Device id (defaults to 0)
+
 ```
+
+## Examples
+
+Streaming from the default webcam to localhost
+
+```python gstreamcam.py 127.0.0.1``` 
+
+
+Streaming from the second webcam to localhost
+
+```python gstreamcam.py --camera 1 127.0.0.1``` 
+
+
+Streaming and creating an SDP file
+
+```python gstreamcam.py 127.0.0.1 --sdp```
 
 
 ## Playing streams using gstreamer
