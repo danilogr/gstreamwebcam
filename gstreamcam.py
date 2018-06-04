@@ -51,8 +51,8 @@ def main(arguments):
                 'openh264' : (b'GstRtpH264Pay', 'openh264enc', 'rtph264pay')}
     rtppay = encoders[arguments.codec][0]
     port = arguments.port
-    process = Popen(["gst-launch-1.0.exe", "-v", "autovideosrc", "!", "videoconvert", "!", encoders[arguments.codec][1],
-                     "!", encoders[arguments.codec][2], "!", "udpsink", "host=%s" % hostname, "port=%d" % port],
+    process = Popen([gstreamer, "-v", "ksvideosrc", "device_index=0", "!", "videoconvert", "!", "videoscale", "!", "video/x-raw,width=800,height=600", "!",
+                    encoders[arguments.codec][1],  "!", encoders[arguments.codec][2], "!", "udpsink", "host=%s" % hostname, "port=%d" % port],
                     stdout=PIPE)
 
     def signal_handler(signal, frame):
@@ -88,9 +88,11 @@ if __name__ == "__main__":
     parser.add_argument("--sdp", help="generates SDP file for the stream (defaults to false)", action="store_true")
     parser.add_argument("--port", "-p", help="port (defaults to 5000)", type=int, default=5000)
     parser.add_argument("--codec", help="chooses encoder (defaults to openh264)", choices=['vp8', 'h264', 'openh264'], default='openh264')
+    parser.add_argument("--camera", help="Device id (defaults to 0)", type=int, default=0)
+
     args = parser.parse_args()
 
     args.hostname = socket.gethostbyname(args.hostname)
-    print("Using hostname %s" % args.hostname)
+    print("Using hostname %s using device %d" % (args.hostname, args.camera))
 
     main(args)
