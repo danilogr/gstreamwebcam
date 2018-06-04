@@ -51,9 +51,11 @@ def main(arguments):
                 'openh264' : (b'GstRtpH264Pay', 'openh264enc', 'rtph264pay')}
     rtppay = encoders[arguments.codec][0]
     port = arguments.port
-    process = Popen([gstreamer, "-v", "ksvideosrc", "device_index=0", "!", "videoconvert", "!", "videoscale", "!", "video/x-raw,width=800,height=600", "!",
-                    encoders[arguments.codec][1],  "!", encoders[arguments.codec][2], "!", "udpsink", "host=%s" % hostname, "port=%d" % port],
-                    stdout=PIPE)
+    arglist = [gstreamer, "-v", "ksvideosrc", "device_index=%d" % arguments.camera, "!", "videoconvert", "!", "videoscale", "!", "video/x-raw,width=800,height=600", "!",
+                    encoders[arguments.codec][1],  "!", encoders[arguments.codec][2], "!", "udpsink", "host=%s" % hostname, "port=%d" % port]
+    if arguments.debug:
+        print("Calling gstreamer:\n"," ".join(arglist))
+    process = Popen(arglist, stdout=PIPE)
 
     def signal_handler(signal, frame):
         process.kill()
@@ -86,6 +88,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("hostname", help="hostname or IP address of the destination")
     parser.add_argument("--sdp", help="generates SDP file for the stream (defaults to false)", action="store_true")
+    parser.add_argument("--debug", help="shows command line in use to call gstreamer", action="store_true")
     parser.add_argument("--port", "-p", help="port (defaults to 5000)", type=int, default=5000)
     parser.add_argument("--codec", help="chooses encoder (defaults to openh264)", choices=['vp8', 'h264', 'openh264'], default='openh264')
     parser.add_argument("--camera", help="Device id (defaults to 0)", type=int, default=0)
