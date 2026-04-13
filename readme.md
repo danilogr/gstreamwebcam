@@ -13,8 +13,8 @@ usage: gstreamcam.py [-h] [--sdp] [--debug] [--port PORT]
                      [--codec {h264,openh264,h265,vp8,av1}]
                      [--format FORMAT] [--camera CAMERA]
                      [--resolution RESOLUTION] [--no-convert]
-                     [--list-codecs] [--timeout TIMEOUT]
-                     [hostname]
+                     [--list-cameras] [--list-codecs]
+                     [--timeout TIMEOUT] [hostname]
 ```
 
 ### Options
@@ -107,7 +107,18 @@ python gstreamcam.py --list-codecs
 
 ## Playing streams
 
-### H264 (x264 or OpenH264)
+### VLC (easiest)
+
+Stream with `--sdp` and open the generated file:
+
+```
+python gstreamcam.py 127.0.0.1 --sdp
+vlc session.sdp
+```
+
+### GStreamer receiver pipelines
+
+#### H264 (x264 or OpenH264)
 
 ```
 gst-launch-1.0 udpsrc port=5000 \
@@ -115,7 +126,7 @@ gst-launch-1.0 udpsrc port=5000 \
   ! rtph264depay ! decodebin ! videoconvert ! autovideosink
 ```
 
-### H265
+#### H265
 
 ```
 gst-launch-1.0 udpsrc port=5000 \
@@ -123,7 +134,7 @@ gst-launch-1.0 udpsrc port=5000 \
   ! rtph265depay ! decodebin ! videoconvert ! autovideosink
 ```
 
-### VP8
+#### VP8
 
 ```
 gst-launch-1.0 udpsrc port=5000 \
@@ -131,7 +142,7 @@ gst-launch-1.0 udpsrc port=5000 \
   ! rtpvp8depay ! vp8dec ! videoconvert ! autovideosink
 ```
 
-### AV1
+#### AV1
 
 ```
 gst-launch-1.0 udpsrc port=5000 \
@@ -155,7 +166,7 @@ gst-launch-1.0 udpsrc port=5000 \
 
 | Format | Chroma | Notes |
 |--------|--------|-------|
-| `I420` | 4:2:0 | Default. Accepted by all encoders. Rarely native to cameras. |
+| `I420` | 4:2:0 | Accepted by all encoders. Rarely native to cameras. |
 | `NV12` | 4:2:0 | Common camera-native format. Works with h264, openh264. |
 | `UYVY` | 4:2:2 | Common camera-native format. Needs videoconvert for most encoders. |
 | `YV12` | 4:2:0 | Works with h264, av1. |
