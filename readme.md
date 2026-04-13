@@ -3,7 +3,7 @@ A Python 3 script that invokes [gstreamer-1.0](https://gstreamer.freedesktop.org
 
 It can also generate a valid SDP file (`session.sdp`) that receivers like [VLC](https://www.videolan.org/vlc/index.html) can open directly.
 
-If something isn't working, run `gstreamcam_doctor.py` to check your [installation](#installation).
+Run with `--list-codecs` to check which codecs are installed, or `--debug` for full GStreamer output when troubleshooting.
 
 ## Usage
 
@@ -37,18 +37,19 @@ When `--resolution` is omitted the camera negotiates its native resolution.
 
 ### Smart pipeline
 
-Before building the pipeline, the script queries the camera's native capabilities via `gst-device-monitor-1.0`. It then builds the **cleanest possible pipeline**:
+Before building the pipeline, the script queries both the **camera's native capabilities** (via `gst-device-monitor-1.0`) and the **encoder's accepted formats** (via `gst-inspect-1.0`). It then builds the cleanest possible pipeline:
 
-1. **Direct** — camera outputs exactly the requested format and resolution. No extra elements.
-2. **videoconvert** — camera supports the resolution but not the pixel format. Adds format conversion.
-3. **videoscale** — camera supports the format but not the resolution. Adds scaling.
-4. **Both** — neither matches. Adds both converters.
+1. **Direct** — camera outputs a format the encoder accepts at the requested resolution. No extra elements.
+2. **videoconvert** — format mismatch between camera and encoder. Adds format conversion.
+3. **videoscale** — resolution not natively supported by camera. Adds scaling.
+4. **Both** — neither format nor resolution match. Adds both converters.
 
-In all fallback cases the script warns you and suggests native settings you can use to avoid conversion:
+In all fallback cases the script warns you and suggests formats that both the camera and encoder support natively:
 
 ```
-WARNING: Camera supports 1280x720 but not in I420. Adding videoconvert.
-INFO: Native formats at 1280x720: NV12, UYVY, YUY2. Try one of these with --format for zero-conversion.
+WARNING: Camera supports NV12 at 1920x1080 but encoder doesn't accept it. Adding videoconvert.
+INFO: Formats supported by both camera and encoder at 1920x1080: I420, Y42B.
+     Try one with --format for zero-conversion.
 ```
 
 Use `--no-convert` to enforce a direct pipeline — the script will fail with suggestions rather than silently adding converters.
@@ -188,16 +189,18 @@ Download and run the official installer from [gstreamer.freedesktop.org](https:/
 
 ## Troubleshooting
 
-Run the diagnostic script to check your setup:
+Check which codecs are installed:
 
 ```
-python gstreamcam_doctor.py
+python gstreamcam.py --list-codecs
 ```
 
-It checks whether GStreamer is installed, which plugins and codecs are available, and whether your camera is accessible. If something is missing it tells you what to install.
+Run with `--debug` to see the full GStreamer command and stderr output.
 
 Common issues:
 
 - **"codec not available"** — the encoder plugin isn't installed. Check the [codecs](#codecs) table for the required package and install it.
+- **"Adding videoconvert"** — the camera doesn't output a format the encoder accepts natively. The script handles this automatically but suggests faster alternatives. Use `--format` with a suggested native format.
 - **Camera not accessible** — on Linux, make sure your user is in the `video` group. On macOS, grant camera permissions when prompted.
 - **"gst-launch-1.0 not found"** — GStreamer isn't installed or not on PATH. See [installation](#installation).
+- **Codec probe timeout** — first run can be slow while GStreamer scans its plugin registry. Try again, or increase `--timeout`.
