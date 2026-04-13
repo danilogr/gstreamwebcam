@@ -25,11 +25,12 @@ usage: gstreamcam.py [-h] [--sdp] [--debug] [--port PORT]
 | `--sdp` | | off | Generate a `session.sdp` file for the stream |
 | `--debug` | | off | Print the GStreamer command being executed |
 | `--port` | `-p` | 5000 | UDP destination port |
-| `--codec` | `-c` | openh264 | Video codec (see [codecs](#codecs)) |
+| `--codec` | `-c` | h264 | Video codec (see [codecs](#codecs)) |
 | `--camera` | | 0 | Camera device index |
-| `--format` | `-f` | I420 | Pixel format (see [pixel formats](#pixel-formats)) |
+| `--format` | `-f` | auto | Pixel format (see [pixel formats](#pixel-formats)); omit to let GStreamer negotiate |
 | `--resolution` | `-r` | native | Request resolution from camera as WIDTHxHEIGHT (e.g., `1280x720`) |
 | `--no-convert` | | off | Fail instead of adding converters; shows native camera capabilities |
+| `--list-cameras` | | | List cameras with supported formats and resolutions |
 | `--list-codecs` | | | List available codecs and exit |
 | `--timeout` | | 60 | Timeout in seconds for codec/camera probes |
 
@@ -90,6 +91,12 @@ Stream and create an SDP file
 
 ```
 python gstreamcam.py 127.0.0.1 --sdp
+```
+
+List cameras and what they support
+
+```
+python gstreamcam.py --list-cameras
 ```
 
 Check which codecs are installed
@@ -155,7 +162,7 @@ gst-launch-1.0 udpsrc port=5000 \
 | `Y42B` | 4:2:2 | Higher chroma quality. Works with h264, h265, av1. |
 | `Y444` | 4:4:4 | Full chroma. Works with h264, h265, av1. |
 
-The script queries your camera and tells you exactly which formats it supports. Use a camera-native format (like `NV12`) to skip `videoconvert` for the fastest pipeline.
+When `--format` is omitted, GStreamer negotiates the best format between camera and encoder automatically. The script queries your camera and tells you which formats are shared. Use `--format` only when you want to force a specific format.
 
 Not all codecs may be available on your system. Run `python gstreamcam.py --list-codecs` to see which ones are installed. If a codec is missing, install the corresponding GStreamer package.
 

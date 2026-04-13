@@ -172,8 +172,8 @@ def _parse_caps_line(line: str) -> list[tuple[tuple[int, int], str]]:
     return [((w, h), f) for w in widths for h in heights for f in formats]
 
 
-def query_camera_caps(device_index: int, timeout: int = 60) -> CameraInfo | None:
-    """Query camera capabilities via gst-device-monitor-1.0."""
+def _run_device_monitor(timeout: int = 60) -> str | None:
+    """Run gst-device-monitor-1.0 and return its stdout, or None on failure."""
     try:
         result = subprocess.run(
             ["gst-device-monitor-1.0", "Video/Source"],
@@ -193,29 +193,77 @@ def query_camera_caps(device_index: int, timeout: int = 60) -> CameraInfo | None
 
     if result.returncode != 0:
         return None
+    return result.stdout
 
-    devices = re.split(r"^Device found:", result.stdout, flags=re.MULTILINE)
-    for block in devices[1:]:
-        index_match = re.search(r"device-index=(\d+)", block)
-        if not index_match or int(index_match.group(1)) != device_index:
-            continue
 
-        name_match = re.search(r"name\s*:\s*(.+)", block)
-        name = name_match.group(1).strip() if name_match else "Unknown"
+def _parse_device_block(block: str) -> CameraInfo | None:
+    """Parse a single device block from gst-device-monitor output."""
+    index_match = re.search(r"device-index=(\d+)", block)
+    if not index_match:
+        return None
 
-        camera = CameraInfo(name=name, device_index=device_index)
+    device_index = int(index_match.group(1))
+    name_match = re.search(r"name\s*:\s*(.+)", block)
+    name = name_match.group(1).strip() if name_match else "Unknown"
 
-        caps_match = re.search(r"caps\s*:\s*(.+?)(?=\tproperties:)", block, re.DOTALL)
-        if caps_match:
-            for line in caps_match.group(1).splitlines():
-                for resolution, fmt in _parse_caps_line(line):
-                    if resolution not in camera.caps:
-                        camera.caps[resolution] = set()
-                    camera.caps[resolution].add(fmt)
+    camera = CameraInfo(name=name, device_index=device_index)
 
-        return camera
+    caps_match = re.search(r"caps\s*:\s*(.+?)(?=\tproperties:)", block, re.DOTALL)
+    if caps_match:
+        for line in caps_match.group(1).splitlines():
+            for resolution, fmt in _parse_caps_line(line):
+                if resolution not in camera.caps:
+                    camera.caps[resolution] = set()
+                camera.caps[resolution].add(fmt)
+
+    return camera
+
+
+def query_all_cameras(timeout: int = 60) -> list[CameraInfo]:
+    """Query all available cameras and their capabilities."""
+    output = _run_device_monitor(timeout)
+    if output is None:
+        return []
+
+    cameras = []
+    for block in re.split(r"^Device found:", output, flags=re.MULTILINE)[1:]:
+        camera = _parse_device_block(block)
+        if camera is not None:
+            cameras.append(camera)
+    return cameras
+
+
+def query_camera_caps(device_index: int, timeout: int = 60) -> CameraInfo | None:
+    """Query capabilities of a specific camera by device index."""
+    output = _run_device_monitor(timeout)
+    if output is None:
+        return None
+
+    for block in re.split(r"^Device found:", output, flags=re.MULTILINE)[1:]:
+        camera = _parse_device_block(block)
+        if camera is not None and camera.device_index == device_index:
+            return camera
 
     return None
+
+
+def print_camera_table(timeout: int = 60) -> None:
+    """Print all cameras with their supported formats and resolutions."""
+    cameras = query_all_cameras(timeout=timeout)
+    if not cameras:
+        print("No cameras found.")
+        return
+
+    for camera in cameras:
+        print(f"Device {camera.device_index}: {camera.name}")
+        if not camera.caps:
+            print("  (no supported formats detected)")
+            continue
+        resolutions = sorted(camera.all_resolutions, key=lambda r: -r[0] * r[1])
+        for res in resolutions:
+            formats = sorted(camera.formats_at(res))
+            print(f"  {res[0]}x{res[1]}: {', '.join(formats)}")
+        print()
 
 
 def parse_resolution(value: str) -> tuple[int, int]:
@@ -284,7 +332,7 @@ class PipelineConfig:
     codec: str
     camera: int
     resolution: tuple[int, int] | None
-    pixel_format: str
+    pixel_format: str | None
     needs_convert: bool = False
     needs_scale: bool = False
 
@@ -309,30 +357,39 @@ def build_pipeline_args(config: PipelineConfig) -> list[str]:
         source = _platform_video_source()
         args.extend([source, f"device-index={config.camera}", "!"])
 
+    fmt = config.pixel_format
+    res = config.resolution
+
     if config.needs_convert and config.needs_scale:
-        args.extend([
-            "videoconvert", "!", "videoscale", "!",
-            f"video/x-raw,format={config.pixel_format},"
-            f"width={config.resolution[0]},height={config.resolution[1]}", "!",
-        ])
+        args.extend(["videoconvert", "!", "videoscale", "!"])
+        caps_parts = [f"width={res[0]},height={res[1]}"]
+        if fmt:
+            caps_parts.insert(0, f"format={fmt}")
+        args.extend([f"video/x-raw,{','.join(caps_parts)}", "!"])
     elif config.needs_convert:
-        if config.resolution:
-            args.extend([
-                f"video/x-raw,width={config.resolution[0]},height={config.resolution[1]}", "!",
-            ])
-        args.extend(["videoconvert", "!", f"video/x-raw,format={config.pixel_format}", "!"])
+        if res:
+            args.extend([f"video/x-raw,width={res[0]},height={res[1]}", "!"])
+        args.append("videoconvert")
+        if fmt:
+            args.extend(["!", f"video/x-raw,format={fmt}", "!"])
+        else:
+            args.append("!")
     elif config.needs_scale:
-        args.extend([
-            f"video/x-raw,format={config.pixel_format}", "!",
-            "videoscale", "!",
-            f"video/x-raw,format={config.pixel_format},"
-            f"width={config.resolution[0]},height={config.resolution[1]}", "!",
-        ])
+        if fmt:
+            args.extend([f"video/x-raw,format={fmt}", "!"])
+        args.extend(["videoscale", "!"])
+        caps_parts = [f"width={res[0]},height={res[1]}"]
+        if fmt:
+            caps_parts.insert(0, f"format={fmt}")
+        args.extend([f"video/x-raw,{','.join(caps_parts)}", "!"])
     else:
-        caps = f"video/x-raw,format={config.pixel_format}"
-        if config.resolution:
-            caps += f",width={config.resolution[0]},height={config.resolution[1]}"
-        args.extend([caps, "!"])
+        caps_parts = []
+        if fmt:
+            caps_parts.append(f"format={fmt}")
+        if res:
+            caps_parts.append(f"width={res[0]},height={res[1]}")
+        if caps_parts:
+            args.extend([f"video/x-raw,{','.join(caps_parts)}", "!"])
 
     args.extend([
         encoder, "!", payloader, "!",
@@ -381,7 +438,7 @@ def _suggest_formats(
 
 def _analyze_pipeline(
     camera: CameraInfo | None,
-    pixel_format: str,
+    pixel_format: str | None,
     resolution: tuple[int, int] | None,
     encoder_formats: set[str] | None,
 ) -> tuple[bool, bool]:
@@ -390,13 +447,12 @@ def _analyze_pipeline(
     Returns (needs_convert, needs_scale). Does not terminate the process —
     the caller decides how to act on the result.
 
-    encoder_formats is the set of pixel formats the encoder accepts, or None
-    if it has no restriction.
+    pixel_format is None when the user didn't specify --format (let GStreamer
+    negotiate). encoder_formats is the set of formats the encoder accepts, or
+    None if it has no restriction.
     """
-    encoder_accepts = encoder_formats is None or pixel_format in encoder_formats
-
     if camera is None:
-        if not encoder_accepts:
+        if pixel_format and encoder_formats and pixel_format not in encoder_formats:
             logger.warning(
                 "Encoder doesn't accept %s. Adding videoconvert.", pixel_format,
             )
@@ -407,8 +463,64 @@ def _analyze_pipeline(
         return True, False
 
     logger.info("Camera: %s", camera.name)
-    needs_convert = False
-    needs_scale = False
+    shared = _suggest_formats(camera.all_formats, encoder_formats)
+
+    # No format specified — check if camera and encoder can negotiate directly
+    if pixel_format is None:
+        if resolution:
+            shared_at_res = _suggest_formats(camera.formats_at(resolution), encoder_formats)
+            if shared_at_res:
+                logger.info(
+                    "Camera and encoder share %s at %s — direct pipeline.",
+                    ", ".join(shared_at_res), _format_resolution(resolution),
+                )
+                return False, False
+            if resolution in camera.all_resolutions:
+                logger.warning(
+                    "No format shared by camera and encoder at %s. "
+                    "Adding videoconvert.",
+                    _format_resolution(resolution),
+                )
+                if shared:
+                    logger.info(
+                        "Shared formats at other resolutions: %s",
+                        ", ".join(shared),
+                    )
+                return True, False
+            # Resolution not supported
+            if shared:
+                logger.warning(
+                    "Camera doesn't support %s. Adding videoscale.",
+                    _format_resolution(resolution),
+                )
+                logger.info(
+                    "Native resolutions: %s",
+                    ", ".join(
+                        _format_resolution(r)
+                        for r in sorted(camera.all_resolutions, key=lambda r: -r[0] * r[1])
+                    ),
+                )
+                return False, True
+            logger.warning(
+                "No shared format and %s isn't a native resolution. "
+                "Adding videoconvert + videoscale.",
+                _format_resolution(resolution),
+            )
+            return True, True
+        else:
+            if shared:
+                logger.info(
+                    "Camera and encoder share %s — direct pipeline.",
+                    ", ".join(shared),
+                )
+                return False, False
+            logger.warning(
+                "No format shared by camera and encoder. Adding videoconvert.",
+            )
+            return True, False
+
+    # Format explicitly specified
+    encoder_accepts = encoder_formats is None or pixel_format in encoder_formats
 
     if resolution:
         has_resolution = resolution in camera.all_resolutions
@@ -420,6 +532,7 @@ def _analyze_pipeline(
                 "Camera natively supports %s at %s — direct pipeline.",
                 pixel_format, _format_resolution(resolution),
             )
+            return False, False
         elif has_resolution:
             needs_convert = True
             if camera_has_format and not encoder_accepts:
@@ -446,40 +559,37 @@ def _analyze_pipeline(
                     "videoconvert is required.",
                     _format_resolution(resolution),
                 )
-        elif camera_has_format or pixel_format in camera.all_formats:
-            needs_scale = True
+            return needs_convert, False
+        elif pixel_format in camera.all_formats:
             if not encoder_accepts:
-                needs_convert = True
                 logger.warning(
                     "Camera supports %s but encoder doesn't, and %s isn't a native "
                     "resolution. Adding videoconvert + videoscale.",
                     pixel_format, _format_resolution(resolution),
                 )
-            else:
-                native_res = camera.resolutions_for(pixel_format)
-                logger.warning(
-                    "Camera supports %s but not at %s. Adding videoscale.",
-                    pixel_format, _format_resolution(resolution),
-                )
-                logger.info(
-                    "Native resolutions for %s: %s. "
-                    "Try one of these with -r for zero-scaling.",
-                    pixel_format,
-                    ", ".join(_format_resolution(r) for r in native_res),
-                )
+                return True, True
+            native_res = camera.resolutions_for(pixel_format)
+            logger.warning(
+                "Camera supports %s but not at %s. Adding videoscale.",
+                pixel_format, _format_resolution(resolution),
+            )
+            logger.info(
+                "Native resolutions for %s: %s. "
+                "Try one of these with -r for zero-scaling.",
+                pixel_format,
+                ", ".join(_format_resolution(r) for r in native_res),
+            )
+            return False, True
         else:
-            needs_convert = True
-            needs_scale = True
             logger.warning(
                 "Camera doesn't support %s or %s natively. "
                 "Adding videoconvert + videoscale.",
                 pixel_format, _format_resolution(resolution),
             )
-            direct = _suggest_formats(camera.all_formats, encoder_formats)
-            if direct:
+            if shared:
                 logger.info(
                     "Formats supported by both camera and encoder: %s",
-                    ", ".join(direct),
+                    ", ".join(shared),
                 )
             logger.info(
                 "Native resolutions: %s",
@@ -488,47 +598,39 @@ def _analyze_pipeline(
                     for r in sorted(camera.all_resolutions, key=lambda r: -r[0] * r[1])
                 ),
             )
+            return True, True
     else:
         camera_has_format = pixel_format in camera.all_formats
-        direct_ok = camera_has_format and encoder_accepts
 
-        if direct_ok:
+        if camera_has_format and encoder_accepts:
             logger.info(
                 "Camera natively supports %s — direct pipeline.", pixel_format,
             )
+            return False, False
         elif camera_has_format and not encoder_accepts:
-            needs_convert = True
             logger.warning(
                 "Camera supports %s but encoder doesn't accept it. "
                 "Adding videoconvert.", pixel_format,
             )
-            direct = _suggest_formats(camera.all_formats, encoder_formats)
-            if direct:
+            if shared:
                 logger.info(
                     "Formats supported by both camera and encoder: %s. "
                     "Try one with --format for zero-conversion.",
-                    ", ".join(direct),
+                    ", ".join(shared),
                 )
+            return True, False
         else:
-            needs_convert = True
             logger.warning(
                 "Camera doesn't natively output %s. Adding videoconvert.",
                 pixel_format,
             )
-            direct = _suggest_formats(camera.all_formats, encoder_formats)
-            if direct:
+            if shared:
                 logger.info(
                     "Formats supported by both camera and encoder: %s. "
                     "Try one with --format for zero-conversion.",
-                    ", ".join(direct),
+                    ", ".join(shared),
                 )
-            elif camera.all_formats:
-                logger.info(
-                    "Camera native formats: %s",
-                    ", ".join(sorted(camera.all_formats)),
-                )
-
-    return needs_convert, needs_scale
+            return True, False
 
 
 def stream(args: argparse.Namespace) -> None:
@@ -590,12 +692,13 @@ def stream(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
 
-    # If videoconvert is needed, pick the format for the encoder side of the
-    # pipeline. Use the user's format if the encoder accepts it, otherwise
-    # fall back to I420 or the first encoder-accepted format.
+    # Pick the format for the caps after videoconvert. When no format was
+    # requested, or the requested format isn't encoder-compatible, choose one
+    # the encoder accepts (prefer I420 as the universal default).
     pipeline_format = args.format
-    if needs_convert and encoder_formats and args.format not in encoder_formats:
-        pipeline_format = "I420" if "I420" in encoder_formats else sorted(encoder_formats)[0]
+    if needs_convert and encoder_formats:
+        if pipeline_format is None or pipeline_format not in encoder_formats:
+            pipeline_format = "I420" if "I420" in encoder_formats else sorted(encoder_formats)[0]
         logger.info(
             "Converting to %s for encoder (requested %s).", pipeline_format, args.format,
         )
@@ -700,8 +803,8 @@ def main() -> None:
     parser.add_argument(
         "--codec", "-c",
         choices=list(CODECS),
-        default="openh264",
-        help="video codec (default: openh264)",
+        default="h264",
+        help="video codec (default: h264)",
     )
     parser.add_argument(
         "--camera",
@@ -711,8 +814,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--format", "-f",
-        default="I420",
-        help="pixel format (default: I420; common: I420, NV12, YV12, Y42B, Y444)",
+        default=None,
+        help="pixel format (e.g., I420, NV12, YV12, Y42B, Y444); omit to let GStreamer negotiate",
     )
     parser.add_argument(
         "--resolution", "-r",
@@ -724,6 +827,11 @@ def main() -> None:
         "--no-convert",
         action="store_true",
         help="fail instead of adding converters; shows what the camera supports natively",
+    )
+    parser.add_argument(
+        "--list-cameras",
+        action="store_true",
+        help="list available cameras with supported formats and resolutions",
     )
     parser.add_argument(
         "--list-codecs",
@@ -743,6 +851,10 @@ def main() -> None:
         level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s: %(message)s",
     )
+
+    if args.list_cameras:
+        print_camera_table(timeout=args.timeout)
+        sys.exit(0)
 
     if args.list_codecs:
         print_codec_table(timeout=args.timeout)
